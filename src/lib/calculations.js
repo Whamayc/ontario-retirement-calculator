@@ -1,3 +1,44 @@
+// ─── CPP / OAS adjustment helpers ────────────────────────────────────────────
+
+// CPP: Early (60–64) −0.6%/month before 65 → max −36% at 60
+//      Late  (66–70) +0.7%/month after  65 → max +42% at 70
+export function adjustCPP(cppMonthly, cppStartAge) {
+  const monthsDiff = (cppStartAge - 65) * 12
+  const factor = monthsDiff < 0
+    ? 1 + monthsDiff * 0.006
+    : 1 + monthsDiff * 0.007
+  return cppMonthly * Math.max(0, factor)
+}
+
+// OAS: Deferral (66–70) +0.6%/month after 65 → max +36% at 70
+export function adjustOAS(oasMonthly, oasStartAge) {
+  if (oasStartAge <= 65) return oasMonthly
+  const monthsDiff = Math.min((oasStartAge - 65) * 12, 60)
+  return oasMonthly * (1 + monthsDiff * 0.006)
+}
+
+// ─── Phased required capital ──────────────────────────────────────────────────
+// When CPP/OAS start after retirement there is a gap period with higher drawdown.
+// Splits retirement into phases and sums discounted PV of each flat-nominal phase.
+function phasedPV(r, retirementAge, lifeExpectancy, futureIncome, futureCPP, futureOAS, futurePensionOther, cppAge, oasAge) {
+  const boundaries = [...new Set([retirementAge, cppAge, oasAge, lifeExpectancy])]
+    .filter(a => a >= retirementAge && a <= lifeExpectancy)
+    .sort((a, b) => a - b)
+
+  let totalPV = 0
+  for (let i = 0; i < boundaries.length - 1; i++) {
+    const phaseStart = boundaries[i]
+    const phaseEnd   = boundaries[i + 1]
+    const duration   = phaseEnd - phaseStart
+    const offset     = phaseStart - retirementAge
+    const activeCPP  = phaseStart >= cppAge ? futureCPP : 0
+    const activeOAS  = phaseStart >= oasAge ? futureOAS : 0
+    const drawdown   = Math.max(0, futureIncome - futurePensionOther - activeCPP - activeOAS)
+    totalPV += PV_annuity(r, duration, drawdown) * Math.pow(1 + r, -offset)
+  }
+  return totalPV
+}
+
 // ─── Core financial primitives ────────────────────────────────────────────────
 
 export function FV_lump(rate, nper, pv) {
@@ -55,13 +96,22 @@ export function runMonteCarlo(inputs, n = 500) {
 
   if (retirementAge <= currentAge || retirementAge >= lifeExpectancy) return null
 
+  const cppStartAge = inputs.cppStartAge ?? 65
+  const oasStartAge = inputs.oasStartAge ?? 65
+  const adjCPP = adjustCPP(cppMonthly, cppStartAge)
+  const adjOAS = adjustOAS(oasMonthly, oasStartAge)
+  const cppAge = Math.max(cppStartAge, retirementAge)
+  const oasAge = Math.max(oasStartAge, retirementAge)
+
   const STD_PRE  = stdDevPre
   const STD_POST = stdDevPost
 
-  const yearsToRetire    = retirementAge - currentAge
-  const inflationFactor  = Math.pow(1 + inflationRate, yearsToRetire)
-  const futurePension    = (cppMonthly + oasMonthly + otherPensionMonthly) * 12 * inflationFactor
-  const annualDrawdown   = Math.max(0, desiredRetirementIncome * inflationFactor - futurePension)
+  const yearsToRetire   = retirementAge - currentAge
+  const inflationFactor = Math.pow(1 + inflationRate, yearsToRetire)
+  const futureIncome    = desiredRetirementIncome * inflationFactor
+  const futureCPP       = adjCPP * 12 * inflationFactor
+  const futureOAS       = adjOAS * 12 * inflationFactor
+  const futurePensionOther = otherPensionMonthly * 12 * inflationFactor
 
   const totalPoints = lifeExpectancy - currentAge + 1
   const allValues   = Array.from({ length: totalPoints }, () => [])
@@ -79,6 +129,9 @@ export function runMonteCarlo(inputs, n = 500) {
         portfolio = portfolio * (1 + sampleNormal(returnRate, STD_PRE)) + contribution
         contribution *= (1 + salaryGrowthRate)
       } else {
+        const activeCPP = age >= cppAge ? futureCPP : 0
+        const activeOAS = age >= oasAge ? futureOAS : 0
+        const annualDrawdown = Math.max(0, futureIncome - futurePensionOther - activeCPP - activeOAS)
         portfolio = portfolio * (1 + sampleNormal(returnRateRetirement, STD_POST)) - annualDrawdown
       }
     }
@@ -101,12 +154,23 @@ export function runMonteCarlo(inputs, n = 500) {
 
 // ─── Year-by-year projection series ──────────────────────────────────────────
 
-function buildProjectionSeries(inputs, nestEgg, annualDrawdownNeeded) {
+function buildProjectionSeries(inputs, adjCPP, adjOAS) {
   const {
     currentAge, retirementAge, lifeExpectancy,
     currentSavings, annualContribution, salaryGrowthRate,
-    returnRate, returnRateRetirement,
+    returnRate, returnRateRetirement, inflationRate,
+    desiredRetirementIncome, otherPensionMonthly,
   } = inputs
+
+  const cppAge = Math.max(inputs.cppStartAge ?? 65, retirementAge)
+  const oasAge = Math.max(inputs.oasStartAge ?? 65, retirementAge)
+
+  const yearsToRetire      = retirementAge - currentAge
+  const inflationFactor    = Math.pow(1 + inflationRate, yearsToRetire)
+  const futureIncome       = desiredRetirementIncome * inflationFactor
+  const futureCPP          = adjCPP * 12 * inflationFactor
+  const futureOAS          = adjOAS * 12 * inflationFactor
+  const futurePensionOther = otherPensionMonthly * 12 * inflationFactor
 
   const series = []
   let portfolio = currentSavings
@@ -128,8 +192,11 @@ function buildProjectionSeries(inputs, nestEgg, annualDrawdownNeeded) {
       totalContributed += contribution
       contribution *= (1 + salaryGrowthRate)
     } else {
-      portfolio = portfolio * (1 + returnRateRetirement) - annualDrawdownNeeded
-      totalContributed -= annualDrawdownNeeded
+      const activeCPP = age >= cppAge ? futureCPP : 0
+      const activeOAS = age >= oasAge ? futureOAS : 0
+      const drawdown  = Math.max(0, futureIncome - futurePensionOther - activeCPP - activeOAS)
+      portfolio = portfolio * (1 + returnRateRetirement) - drawdown
+      totalContributed -= drawdown
     }
   }
 
@@ -235,22 +302,41 @@ export function runCalculations(inputs) {
     return emptyResults()
   }
 
-  const yearsToRetire = retirementAge - currentAge
+  const cppStartAge = inputs.cppStartAge ?? 65
+  const oasStartAge = inputs.oasStartAge ?? 65
+  const adjCPP = adjustCPP(cppMonthly, cppStartAge)
+  const adjOAS = adjustOAS(oasMonthly, oasStartAge)
+  const cppAge = Math.max(cppStartAge, retirementAge)
+  const oasAge = Math.max(oasStartAge, retirementAge)
+
+  const yearsToRetire   = retirementAge - currentAge
   const retirementYears = lifeExpectancy - retirementAge
 
-  // Steps 1–4: nest egg
-  const fvSavings = FV_lump(returnRate, yearsToRetire, currentSavings)
+  // Nest egg
+  const fvSavings       = FV_lump(returnRate, yearsToRetire, currentSavings)
   const fvContributions = FV_growing_annuity(returnRate, yearsToRetire, annualContribution, salaryGrowthRate)
-  const nestEgg = fvSavings + fvContributions
+  const nestEgg         = fvSavings + fvContributions
 
-  // Steps 5–8: required drawdown
-  const inflationFactor = Math.pow(1 + inflationRate, yearsToRetire)
-  const futureDesiredIncome = desiredRetirementIncome * inflationFactor
-  const futurePensionIncome = (cppMonthly + oasMonthly + otherPensionMonthly) * 12 * inflationFactor
-  const annualDrawdownNeeded = Math.max(0, futureDesiredIncome - futurePensionIncome)
+  // Future nominal amounts at retirement
+  const inflationFactor      = Math.pow(1 + inflationRate, yearsToRetire)
+  const futureDesiredIncome  = desiredRetirementIncome * inflationFactor
+  const futureCPP            = adjCPP * 12 * inflationFactor
+  const futureOAS            = adjOAS * 12 * inflationFactor
+  const futurePensionOther   = otherPensionMonthly * 12 * inflationFactor
+  const futurePensionSteady  = futureCPP + futureOAS + futurePensionOther
+  // Initial drawdown at retirement (before any delayed CPP/OAS)
+  const futurePensionAtRetirement =
+    futurePensionOther +
+    (cppAge <= retirementAge ? futureCPP : 0) +
+    (oasAge <= retirementAge ? futureOAS : 0)
+  const annualDrawdownNeeded = Math.max(0, futureDesiredIncome - futurePensionAtRetirement)
 
-  // Steps 9–11: required capital and gap (uses retirement-phase return rate)
-  const requiredCapital = PV_annuity(returnRateRetirement, retirementYears, annualDrawdownNeeded)
+  // Required capital — phased to account for gap before CPP/OAS starts
+  const requiredCapital = phasedPV(
+    returnRateRetirement, retirementAge, lifeExpectancy,
+    futureDesiredIncome, futureCPP, futureOAS, futurePensionOther,
+    cppAge, oasAge
+  )
   const surplusShortfall = nestEgg - requiredCapital
 
   // Status
@@ -269,23 +355,22 @@ export function runCalculations(inputs) {
     : []
 
   // Projection series for charts
-  const projectionSeries = buildProjectionSeries(inputs, nestEgg, annualDrawdownNeeded)
+  const projectionSeries = buildProjectionSeries(inputs, adjCPP, adjOAS)
 
-  // Income breakdown at retirement (future dollars)
+  // Income breakdown — steady state when all pensions active
+  const annualDrawdownSteady = Math.max(0, futureDesiredIncome - futurePensionSteady)
   const incomeBreakdown = {
-    cpp: cppMonthly * 12 * inflationFactor,
-    oas: oasMonthly * 12 * inflationFactor,
-    pension: otherPensionMonthly * 12 * inflationFactor,
-    drawdown: annualDrawdownNeeded,
+    cpp:      futureCPP,
+    oas:      futureOAS,
+    pension:  futurePensionOther,
+    drawdown: annualDrawdownSteady,
   }
 
-  // FIRE Number: portfolio needed using SWR rule (drawdown / SWR)
-  const fireNumber = swrRate > 0 ? annualDrawdownNeeded / swrRate : 0
-  // Today's-dollars FIRE number (before inflation)
+  // FIRE Number (today's dollars, uses adjusted steady-state CPP/OAS)
   const fireNumberToday = swrRate > 0
-    ? Math.max(0, desiredRetirementIncome - (cppMonthly + oasMonthly + otherPensionMonthly) * 12) / swrRate
+    ? Math.max(0, desiredRetirementIncome - (adjCPP + adjOAS + otherPensionMonthly) * 12) / swrRate
     : 0
-  // How far along: current savings as % of today's FIRE number
+  const fireNumber   = swrRate > 0 ? annualDrawdownSteady / swrRate : 0
   const fireProgress = fireNumberToday > 0 ? Math.min(currentSavings / fireNumberToday, 1) : 1
 
   return {
@@ -301,8 +386,12 @@ export function runCalculations(inputs) {
     retirementYears,
     inflationFactor,
     futureDesiredIncome,
-    futurePensionIncome,
+    futurePensionIncome: futurePensionSteady,
     annualDrawdownNeeded,
+    adjCPP,
+    adjOAS,
+    cppStartAge,
+    oasStartAge,
     // FIRE
     fireNumber,
     fireNumberToday,

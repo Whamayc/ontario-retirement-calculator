@@ -66,4 +66,6 @@ export const APP_DEFAULTS = {
   cppMonthly: CPP.AVG_MONTHLY_2025,
   oasMonthly: OAS.MONTHLY_65_74,
   otherPensionMonthly: 0,
+  cppStartAge: 65,
+  oasStartAge: 65,
 }
