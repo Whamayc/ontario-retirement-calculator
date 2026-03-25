@@ -4,8 +4,9 @@
   let { inputs = $bindable() } = $props()
 
   function setFloat(field, e) {
-    const v = parseFloat(e.target.value)
-    if (!isNaN(v)) inputs[field] = v
+    const raw = e.target.value
+    const v = raw === '' ? 0 : parseFloat(raw)
+    inputs[field] = isNaN(v) ? 0 : v
   }
 
   let rrspAnnual                = $derived((inputs.rrspContribution ?? 0) * periodsFor(inputs.rrspFrequency ?? 'annually'))

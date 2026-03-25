@@ -23,10 +23,25 @@
   }
 
   let inputs = $state(loadInputs())
-  let results = $derived(runCalculations(inputs))
-  let mcResults = $derived(runMonteCarlo(inputs))
+  let results = $state(runCalculations({ ...inputs }))
+  let mcResults = $state(runMonteCarlo({ ...inputs }))
 
-  $effect(() => { saveInputs({ ...inputs }) })
+  // Debounce expensive calculations so every keystroke doesn't block the UI.
+  // Inputs update immediately (sliders/fields feel instant); results follow after idle.
+  $effect(() => {
+    const snap = { ...inputs }
+    const t = setTimeout(() => {
+      results = runCalculations(snap)
+      saveInputs(snap)
+    }, 150)
+    return () => clearTimeout(t)
+  })
+
+  $effect(() => {
+    const snap = { ...inputs }
+    const t = setTimeout(() => { mcResults = runMonteCarlo(snap) }, 300)
+    return () => clearTimeout(t)
+  })
 </script>
 
 <div class="app-shell">
