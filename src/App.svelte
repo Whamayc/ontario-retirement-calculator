@@ -1,6 +1,7 @@
 <script>
   import { APP_DEFAULTS, DATA_FRESHNESS_NOTE } from './lib/constants.js'
   import { runCalculations, runMonteCarlo } from './lib/calculations.js'
+  import CalcWorker from './lib/calc.worker?worker'
   import InputForm from './components/InputForm.svelte'
   import ResultsPanel from './components/ResultsPanel.svelte'
   import ProjectionChart from './components/ProjectionChart.svelte'
@@ -22,26 +23,31 @@
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(vals)) } catch {}
   }
 
-  let inputs = $state(loadInputs())
-  let results = $state(runCalculations({ ...inputs }))
+  let inputs    = $state(loadInputs())
+  // Seed synchronously so the UI is never blank on first paint
+  let results   = $state(runCalculations({ ...inputs }))
   let mcResults = $state(runMonteCarlo({ ...inputs }))
 
-  // Debounce expensive calculations so every keystroke doesn't block the UI.
-  // Inputs update immediately (sliders/fields feel instant); results follow after idle.
+  // Worker runs calculations off the main thread — UI stays responsive at all times
+  const worker = new CalcWorker()
+  worker.onmessage = (e) => {
+    if (e.data.type === 'results') {
+      results   = e.data.results
+      mcResults = e.data.mcResults
+    }
+  }
+
+  // Debounce: wait until user stops interacting, then dispatch to worker
   $effect(() => {
     const snap = { ...inputs }
     const t = setTimeout(() => {
-      results = runCalculations(snap)
+      worker.postMessage({ type: 'runAll', inputs: snap })
       saveInputs(snap)
     }, 150)
     return () => clearTimeout(t)
   })
 
-  $effect(() => {
-    const snap = { ...inputs }
-    const t = setTimeout(() => { mcResults = runMonteCarlo(snap) }, 300)
-    return () => clearTimeout(t)
-  })
+  $effect(() => () => worker.terminate())
 </script>
 
 <div class="app-shell">
