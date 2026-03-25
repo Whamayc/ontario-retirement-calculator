@@ -58,6 +58,41 @@ export function estimateTakeHome(grossIncome, rrspDeduction = 0) {
   return grossIncome - fedTax - onTax - totalCPP - ei - rrspDeduction
 }
 
+// Retirement income tax only (no CPP/EI — retirees don't pay employment premiums).
+// Returns net after-tax income for a given gross retirement income.
+function retirementAfterTax(gross) {
+  if (gross <= 0) return 0
+  const fedGross   = progressiveTax(gross, FEDERAL_TAX_BRACKETS_2026)
+  const fedCredits = FEDERAL_BPA_2026 * FEDERAL_CREDIT_RATE_2026
+  const fedTax     = Math.max(0, fedGross - fedCredits)
+
+  const onGross  = progressiveTax(gross, ONTARIO_TAX_BRACKETS_2026)
+  let onSurtax = 0
+  if (onGross > ONTARIO_SURTAX_2026.THRESHOLD_2) {
+    onSurtax = ONTARIO_SURTAX_2026.RATE_1 * (onGross - ONTARIO_SURTAX_2026.THRESHOLD_1)
+             + ONTARIO_SURTAX_2026.RATE_2 * (onGross - ONTARIO_SURTAX_2026.THRESHOLD_2)
+  } else if (onGross > ONTARIO_SURTAX_2026.THRESHOLD_1) {
+    onSurtax = ONTARIO_SURTAX_2026.RATE_1 * (onGross - ONTARIO_SURTAX_2026.THRESHOLD_1)
+  }
+  const onCredits = ONTARIO_BPA_2026 * ONTARIO_CREDIT_RATE_2026
+  const onTax     = Math.max(0, onGross + onSurtax - onCredits)
+
+  return gross - fedTax - onTax
+}
+
+// Finds the pre-tax retirement income needed to yield a given after-tax amount.
+// Uses binary search since the tax function has no simple closed-form inverse.
+export function grossUpRetirementIncome(targetAfterTax) {
+  if (targetAfterTax <= 0) return 0
+  let lo = targetAfterTax, hi = targetAfterTax * 2.5
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2
+    if (retirementAfterTax(mid) < targetAfterTax) lo = mid
+    else hi = mid
+  }
+  return Math.round((lo + hi) / 2)
+}
+
 // ─── Contribution frequency helpers ──────────────────────────────────────────
 
 const PERIODS_PER_YEAR = { weekly: 52, biweekly: 26, monthly: 12, quarterly: 4, annually: 1 }

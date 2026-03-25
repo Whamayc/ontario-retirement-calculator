@@ -1,5 +1,5 @@
 <script>
-  import { estimateTakeHome } from '../lib/calculations.js'
+  import { estimateTakeHome, grossUpRetirementIncome } from '../lib/calculations.js'
   import { RRSP, TFSA } from '../lib/constants.js'
 
   let { inputs = $bindable() } = $props()
@@ -41,6 +41,12 @@
 
   // RRSP contribution limit: lesser of 18% of earned income or CRA 2026 annual cap
   let rrspLimit     = $derived(Math.min(Math.floor(inputs.annualIncome * 0.18), RRSP.ANNUAL_LIMIT_2026))
+
+  // Suggested retirement income: 80% of living expenses, grossed up to pre-tax
+  let suggestedRetirementIncome = $derived(grossUpRetirementIncome(inputs.annualExpenses))
+
+  // Annual surplus (+) or deficit (−): take-home minus living expenses minus non-reg contribution
+  let annualSurplus = $derived(takeHome - inputs.annualExpenses - tfsaAnnual - nonRegAnnual)
 </script>
 
 <div class="section-body">
@@ -240,6 +246,11 @@
         = <strong>${nonRegAnnual.toLocaleString('en-CA', { maximumFractionDigits: 0 })}/year</strong> ·
       {/if}
       Total all accounts: <strong>${totalAnnual.toLocaleString('en-CA', { maximumFractionDigits: 0 })}/year</strong>
+      <br>Annual {annualSurplus >= 0 ? 'surplus' : 'deficit'}:
+      <strong class={annualSurplus >= 0 ? 'surplus' : 'deficit'}>
+        {annualSurplus >= 0 ? '+' : '−'}${Math.abs(Math.round(annualSurplus)).toLocaleString('en-CA')}/yr
+        ({annualSurplus >= 0 ? '+' : '−'}${Math.abs(Math.round(annualSurplus / 12)).toLocaleString('en-CA')}/mo)
+      </strong>
     </span>
   </div>
 
@@ -285,7 +296,11 @@
       />
       <span class="suffix" aria-hidden="true">today $</span>
     </div>
-    <span class="field-hint" id="desiredRetirementIncome-hint">In today's dollars — will be adjusted for inflation.</span>
+    <span class="field-hint" id="desiredRetirementIncome-hint">
+      In today's dollars — will be adjusted for inflation.
+      Suggested: <strong>${suggestedRetirementIncome.toLocaleString('en-CA')}/yr</strong>
+      (your living expenses after tax, grossed up to pre-tax)
+    </span>
   </div>
 </div>
 
@@ -331,5 +346,8 @@
   .freq-toggle button:hover:not(.active) {
     background: var(--color-border);
   }
+
+  .surplus { color: var(--color-green, #16a34a); }
+  .deficit  { color: var(--color-red,   #dc2626); }
 
 </style>
