@@ -2,7 +2,7 @@ import { SP500_ANNUAL_RETURNS } from './historicalReturns.js'
 import {
   FEDERAL_TAX_BRACKETS_2026, FEDERAL_BPA_2026, FEDERAL_CREDIT_RATE_2026,
   ONTARIO_TAX_BRACKETS_2026, ONTARIO_BPA_2026, ONTARIO_CREDIT_RATE_2026, ONTARIO_SURTAX_2026,
-  CPP_2026, EI_2026,
+  CPP_2026, EI_2026, OAS,
 } from './constants.js'
 
 // ─── Tax estimation ───────────────────────────────────────────────────────────
@@ -95,7 +95,8 @@ export function grossUpRetirementIncome(targetAfterTax) {
 
 // ─── Contribution frequency helpers ──────────────────────────────────────────
 
-const PERIODS_PER_YEAR = { weekly: 52, biweekly: 26, monthly: 12, quarterly: 4, annually: 1 }
+export const PERIODS_PER_YEAR = { weekly: 52, biweekly: 26, monthly: 12, quarterly: 4, annually: 1 }
+export function periodsFor(freqKey) { return PERIODS_PER_YEAR[freqKey] ?? 1 }
 
 // Within-year compounding factor for periodic contributions.
 // More frequent contributions are invested earlier → earn more return within the year.
@@ -117,7 +118,7 @@ function effectiveAnnualContrib(inputs, rate) {
     { periodic: inputs.nonRegContribution ?? 0, freq: inputs.nonRegFrequency ?? 'annually' },
   ]
   return accounts.reduce((sum, { periodic, freq }) => {
-    const n = PERIODS_PER_YEAR[freq] ?? 1
+    const n = periodsFor(freq)
     return sum + periodic * n * contributionFactor(rate, n)
   }, 0)
 }
@@ -125,9 +126,9 @@ function effectiveAnnualContrib(inputs, rate) {
 // Nominal annual total (no compounding factor) — used for display and recommendations.
 function nominalAnnualContrib(inputs) {
   return (
-    (inputs.rrspContribution   ?? 0) * (PERIODS_PER_YEAR[inputs.rrspFrequency   ?? 'annually'] ?? 1) +
-    (inputs.tfsaContribution   ?? 0) * (PERIODS_PER_YEAR[inputs.tfsaFrequency   ?? 'annually'] ?? 1) +
-    (inputs.nonRegContribution ?? 0) * (PERIODS_PER_YEAR[inputs.nonRegFrequency ?? 'annually'] ?? 1)
+    (inputs.rrspContribution   ?? 0) * periodsFor(inputs.rrspFrequency   ?? 'annually') +
+    (inputs.tfsaContribution   ?? 0) * periodsFor(inputs.tfsaFrequency   ?? 'annually') +
+    (inputs.nonRegContribution ?? 0) * periodsFor(inputs.nonRegFrequency ?? 'annually')
   )
 }
 
@@ -254,6 +255,7 @@ export function runMonteCarlo(inputs, n = 500) {
   const futurePensionOther = otherPensionMonthly * 12 * inflationFactor
 
   const initEffContrib = effectiveAnnualContrib(inputs, returnRate)
+  const otherNetAssets = inputs.otherNetAssets ?? 0
 
   // Sampling functions per mode
   const samplePre  = mcMode === 'historical'
@@ -274,6 +276,9 @@ export function runMonteCarlo(inputs, n = 500) {
 
     for (let i = 0; i < totalPoints; i++) {
       const age = currentAge + i
+
+      if (i === yearsToRetire) portfolio += otherNetAssets
+
       allValues[i].push(Math.max(0, portfolio))
 
       if (age < retirementAge) {
@@ -323,13 +328,22 @@ function buildProjectionSeries(inputs, adjCPP, adjOAS) {
   const futureOAS          = adjOAS * 12 * inflationFactor
   const futurePensionOther = otherPensionMonthly * 12 * inflationFactor
 
+  const otherNetAssets = inputs.otherNetAssets ?? 0
+
   const series = []
   let portfolio    = currentSavings
   let totalContrib = currentSavings
   let effContrib   = effectiveAnnualContrib(inputs, returnRate)  // grows each year
   let nomContrib   = nominalAnnualContrib(inputs)                 // for tracking
+  let otherAssetsAdded = false
 
   for (let age = currentAge; age <= lifeExpectancy; age++) {
+    if (age === retirementAge && !otherAssetsAdded && otherNetAssets > 0) {
+      portfolio    += otherNetAssets
+      totalContrib += otherNetAssets
+      otherAssetsAdded = true
+    }
+
     const pv = Math.max(0, portfolio)
     const contributed = Math.max(0, Math.min(totalContrib, pv))
     series.push({
@@ -440,11 +454,12 @@ function computeRecommendations(inputs, shortfall, requiredCapital) {
 export function runCalculations(inputs) {
   const {
     currentAge, retirementAge, currentSavings,
-    salaryGrowthRate, desiredRetirementIncome,
+    salaryGrowthRate, desiredRetirementIncome, annualIncome,
     returnRate, returnRateRetirement, inflationRate, lifeExpectancy,
     cppMonthly, oasMonthly, otherPensionMonthly,
     swrRate,
   } = inputs
+  const otherAssets = inputs.otherNetAssets ?? 0
 
   // Guard: invalid age configuration
   if (
@@ -469,7 +484,7 @@ export function runCalculations(inputs) {
   const initEffectiveContrib = effectiveAnnualContrib(inputs, returnRate)
   const fvSavings            = FV_lump(returnRate, yearsToRetire, currentSavings)
   const fvContributions      = FV_growing_annuity(returnRate, yearsToRetire, initEffectiveContrib, salaryGrowthRate)
-  const nestEgg              = fvSavings + fvContributions
+  const nestEgg              = fvSavings + fvContributions + otherAssets
 
   // Future nominal amounts at retirement
   const inflationFactor      = Math.pow(1 + inflationRate, yearsToRetire)
@@ -520,12 +535,33 @@ export function runCalculations(inputs) {
     drawdown: annualDrawdownSteady,
   }
 
-  // FIRE Number (today's dollars, uses adjusted steady-state CPP/OAS)
-  const fireNumberToday = swrRate > 0
-    ? Math.max(0, desiredRetirementIncome - (adjCPP + adjOAS + otherPensionMonthly) * 12) / swrRate
-    : 0
-  const fireNumber   = swrRate > 0 ? annualDrawdownSteady / swrRate : 0
-  const fireProgress = fireNumberToday > 0 ? Math.min(currentSavings / fireNumberToday, 1) : 1
+  // FIRE Number — capital needed if retiring TODAY at currentAge, in today's dollars.
+  // Uses phasedPV (same as requiredCapital) anchored at currentAge so the gap before
+  // CPP/OAS start ages is properly priced in. CPP/OAS ages are clamped to currentAge
+  // since you can't start them in the past.
+  const cppAgeToday    = Math.max(cppStartAge, currentAge)
+  const oasAgeToday    = Math.max(oasStartAge, currentAge)
+  const fireNumberTodayGross = phasedPV(
+    swrRate,
+    currentAge,
+    lifeExpectancy,
+    desiredRetirementIncome,
+    adjCPP  * 12,
+    adjOAS  * 12,
+    otherPensionMonthly * 12,
+    cppAgeToday,
+    oasAgeToday
+  )
+  const fireNumber      = Math.max(0, requiredCapital - otherAssets)
+  const fireProgress    = fireNumberTodayGross > 0 ? Math.min((currentSavings + otherAssets) / fireNumberTodayGross, 1) : 1
+
+  // ─── Key metrics ──────────────────────────────────────────────────────────────
+  const savingsRate     = annualIncome > 0 ? nominalAnnualContrib(inputs) / annualIncome : 0
+  const replacementRate = annualIncome > 0 ? desiredRetirementIncome / annualIncome : 0
+  const actualWithdrawalRate = nestEgg > 0 ? annualDrawdownNeeded / nestEgg : 0
+  const realReturnPre   = real_rate(returnRate, inflationRate)
+  const realReturnPost  = real_rate(returnRateRetirement, inflationRate)
+  const oasClawbackRisk = desiredRetirementIncome > OAS.CLAWBACK_THRESHOLD
 
   return {
     nestEgg,
@@ -548,9 +584,18 @@ export function runCalculations(inputs) {
     oasStartAge,
     // FIRE
     fireNumber,
-    fireNumberToday,
+    fireNumberTodayGross,
+    otherAssets,
+    currentSavings,
     fireProgress,
     swrRate,
+    // Key metrics
+    savingsRate,
+    replacementRate,
+    actualWithdrawalRate,
+    realReturnPre,
+    realReturnPost,
+    oasClawbackRisk,
   }
 }
 
@@ -570,8 +615,17 @@ function emptyResults() {
     futurePensionIncome: 0,
     annualDrawdownNeeded: 0,
     fireNumber: 0,
-    fireNumberToday: 0,
+    fireNumberTodayGross: 0,
+    otherAssets: 0,
+    currentSavings: 0,
     fireProgress: 0,
     swrRate: 0.04,
+    // Key metrics
+    savingsRate: 0,
+    replacementRate: 0,
+    actualWithdrawalRate: 0,
+    realReturnPre: 0,
+    realReturnPost: 0,
+    oasClawbackRisk: false,
   }
 }

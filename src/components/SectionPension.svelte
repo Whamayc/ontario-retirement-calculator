@@ -2,7 +2,6 @@
   import { CPP, OAS } from '../lib/constants.js'
   let { inputs = $bindable() } = $props()
 
-  // Live-computed adjusted monthly amounts based on chosen start ages
   let adjCPPFactor  = $derived(
     inputs.cppStartAge < 65
       ? 1 + (inputs.cppStartAge - 65) * 12 * CPP.EARLY_REDUCTION_PER_MONTH

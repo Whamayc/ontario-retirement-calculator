@@ -97,6 +97,7 @@ export const APP_DEFAULTS = {
   currentAge: 35,
   retirementAge: 65,
   currentSavings: 50000,
+  otherNetAssets: 0,
   annualIncome: 85000,
   annualExpenses: 60000,
   rrspContribution: 700,
@@ -108,7 +109,7 @@ export const APP_DEFAULTS = {
   salaryGrowthRate: 0.02,
   desiredRetirementIncome: 60000,
   returnRate: 0.06,
-  returnRateRetirement: 0.04,
+  returnRateRetirement: 0.03,
   inflationRate: 0.025,
   stdDevPre: 0.12,
   stdDevPost: 0.08,
@@ -119,5 +120,5 @@ export const APP_DEFAULTS = {
   otherPensionMonthly: 0,
   cppStartAge: 65,
   oasStartAge: 65,
-  mcMode: 'lognormal',
+  mcMode: 'historical',
 }

@@ -212,28 +212,6 @@
     <span class="field-hint" id="stdDevPost-hint">Monte Carlo only. Conservative/income portfolio: ~6–10%. Default: 8%.</span>
   </div>
   {/if}
-
-  <!-- Life Expectancy -->
-  <div class="field">
-    <label for="lifeExpectancy">Life Expectancy</label>
-    <div class="slider-pair">
-      <input
-        type="range" id="lifeExpectancy-range"
-        min="65" max="105" step="1"
-        aria-label="Life expectancy in years"
-        bind:value={inputs.lifeExpectancy}
-      />
-      <input
-        type="number" id="lifeExpectancy"
-        min="65" max="105" step="1"
-        inputmode="numeric"
-        aria-label="Life expectancy in years"
-        aria-describedby="lifeExpectancy-hint"
-        bind:value={inputs.lifeExpectancy}
-      />
-    </div>
-    <span class="field-hint" id="lifeExpectancy-hint">Canadian average life expectancy at 65: ~86 (men), ~88 (women). Default: 90 for safety margin.</span>
-  </div>
 </div>
 
 <style>

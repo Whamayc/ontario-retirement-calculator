@@ -1,99 +1,35 @@
 <script>
-  import { estimateTakeHome, grossUpRetirementIncome } from '../lib/calculations.js'
+  import { estimateTakeHome, periodsFor } from '../lib/calculations.js'
   import { RRSP, TFSA } from '../lib/constants.js'
 
   let { inputs = $bindable() } = $props()
-
-  function setInt(field, e) {
-    const v = parseInt(e.target.value, 10)
-    if (!isNaN(v)) inputs[field] = v
-  }
 
   function setFloat(field, e) {
     const v = parseFloat(e.target.value)
     if (!isNaN(v)) inputs[field] = v
   }
 
+  const FREQUENCIES = [
+    { key: 'weekly',    label: 'Weekly'    },
+    { key: 'biweekly',  label: 'Bi-weekly' },
+    { key: 'monthly',   label: 'Monthly'   },
+    { key: 'quarterly', label: 'Quarterly' },
+    { key: 'annually',  label: 'Annually'  },
+  ]
+
   let salaryGrowthPct = $derived(+(inputs.salaryGrowthRate * 100).toFixed(1))
   function setSalaryGrowth(e) { inputs.salaryGrowthRate = parseFloat(e.target.value) / 100 }
 
-  // Contribution frequency options
-  const FREQUENCIES = [
-    { key: 'weekly',    label: 'Weekly',    periods: 52  },
-    { key: 'biweekly',  label: 'Bi-weekly', periods: 26  },
-    { key: 'monthly',   label: 'Monthly',   periods: 12  },
-    { key: 'quarterly', label: 'Quarterly', periods: 4   },
-    { key: 'annually',  label: 'Annually',  periods: 1   },
-  ]
-
-  function periodsFor(freqKey) {
-    return FREQUENCIES.find(f => f.key === freqKey)?.periods ?? 1
-  }
-
-  // Per-account annual totals for hints
-  let rrspAnnual    = $derived(inputs.rrspContribution    * periodsFor(inputs.rrspFrequency))
-  let tfsaAnnual    = $derived(inputs.tfsaContribution    * periodsFor(inputs.tfsaFrequency))
-  let nonRegAnnual  = $derived(inputs.nonRegContribution  * periodsFor(inputs.nonRegFrequency))
+  let rrspAnnual    = $derived(inputs.rrspContribution   * periodsFor(inputs.rrspFrequency))
+  let tfsaAnnual    = $derived(inputs.tfsaContribution   * periodsFor(inputs.tfsaFrequency))
+  let nonRegAnnual  = $derived(inputs.nonRegContribution * periodsFor(inputs.nonRegFrequency))
   let totalAnnual   = $derived(rrspAnnual + tfsaAnnual + nonRegAnnual)
-
-  // Estimated take-home: pre-tax income minus federal + Ontario tax, with RRSP deduction
   let takeHome      = $derived(estimateTakeHome(inputs.annualIncome, rrspAnnual))
-
-  // RRSP contribution limit: lesser of 18% of earned income or CRA 2026 annual cap
   let rrspLimit     = $derived(Math.min(Math.floor(inputs.annualIncome * 0.18), RRSP.ANNUAL_LIMIT_2026))
-
-  // Suggested retirement income: 80% of living expenses, grossed up to pre-tax
-  let suggestedRetirementIncome = $derived(grossUpRetirementIncome(inputs.annualExpenses))
-
-  // Annual surplus (+) or deficit (−): take-home minus living expenses minus non-reg contribution
   let annualSurplus = $derived(takeHome - inputs.annualExpenses - tfsaAnnual - nonRegAnnual)
 </script>
 
 <div class="section-body">
-  <!-- Current Age -->
-  <div class="field">
-    <label for="currentAge">Current Age</label>
-    <div class="slider-pair">
-      <input
-        type="range"
-        min="18" max="80" step="1"
-        value={inputs.currentAge}
-        aria-label="Current age slider"
-        oninput={(e) => setInt('currentAge', e)}
-      />
-      <input
-        type="number" id="currentAge"
-        min="18" max="80" step="1"
-        inputmode="numeric"
-        value={inputs.currentAge}
-        aria-label="Current age in years"
-        oninput={(e) => setInt('currentAge', e)}
-      />
-    </div>
-  </div>
-
-  <!-- Retirement Age -->
-  <div class="field">
-    <label for="retirementAge">Desired Retirement Age</label>
-    <div class="slider-pair">
-      <input
-        type="range"
-        min="45" max="80" step="1"
-        value={inputs.retirementAge}
-        aria-label="Desired retirement age slider"
-        oninput={(e) => setInt('retirementAge', e)}
-      />
-      <input
-        type="number" id="retirementAge"
-        min="45" max="80" step="1"
-        inputmode="numeric"
-        value={inputs.retirementAge}
-        aria-label="Desired retirement age"
-        oninput={(e) => setInt('retirementAge', e)}
-      />
-    </div>
-  </div>
-
   <!-- Current Savings -->
   <div class="field">
     <label for="currentSavings">Current Retirement Savings</label>
@@ -110,43 +46,24 @@
     </div>
   </div>
 
-  <!-- Annual Income -->
+  <!-- Other Net Assets -->
   <div class="field">
-    <label for="annualIncome">Annual Pre-Tax Income</label>
+    <label for="otherNetAssets">Other Net Assets for Retirement</label>
     <div class="input-wrap has-prefix">
       <span class="prefix" aria-hidden="true">$</span>
       <input
-        type="number" id="annualIncome"
-        min="0" max="2000000" step="1000"
+        type="number" id="otherNetAssets"
+        min="0" max="10000000" step="1000"
         inputmode="decimal"
-        value={inputs.annualIncome}
-        aria-label="Annual pre-tax income in Canadian dollars"
-        oninput={(e) => setFloat('annualIncome', e)}
+        value={inputs.otherNetAssets}
+        aria-label="Other net assets in Canadian dollars"
+        oninput={(e) => setFloat('otherNetAssets', e)}
       />
     </div>
     <span class="field-hint">
-      Est. take-home after tax &amp; RRSP contribution (${rrspAnnual.toLocaleString('en-CA', { maximumFractionDigits: 0 })}/yr):
-      <strong>${takeHome.toLocaleString('en-CA', { maximumFractionDigits: 0 })}/year</strong>
-      · <strong>${Math.round(takeHome / 12).toLocaleString('en-CA')}/month</strong>
-      (federal + Ontario incl. surtax, BPA credits, CPP &amp; EI; excl. Ontario Health Premium)
+      Your estimated value of these assets at retirement — e.g. home equity (expected market value minus remaining mortgage), rental property, or other alternative investments you plan to liquidate.
+      Enter the value you expect to have at retirement; it is added directly to your nest egg without further growth.
     </span>
-  </div>
-
-  <!-- Annual Expenses -->
-  <div class="field">
-    <label for="annualExpenses">Annual Living Expenses</label>
-    <div class="input-wrap has-prefix">
-      <span class="prefix" aria-hidden="true">$</span>
-      <input
-        type="number" id="annualExpenses"
-        min="0" max="2000000" step="1000"
-        inputmode="decimal"
-        value={inputs.annualExpenses}
-        aria-label="Annual living expenses in Canadian dollars"
-        oninput={(e) => setFloat('annualExpenses', e)}
-      />
-    </div>
-    <span class="field-hint">Toronto single person all-in avg: ~$46,116/year</span>
   </div>
 
   <!-- RRSP Contribution -->
@@ -279,29 +196,6 @@
     </div>
     <span class="field-hint">Your contribution grows by this % each year. Blended lifetime avg: ~2–3% nominal. Set to 0% to keep contributions fixed.</span>
   </div>
-
-  <!-- Desired Retirement Income -->
-  <div class="field">
-    <label for="desiredRetirementIncome">Desired Annual Retirement Income</label>
-    <div class="input-wrap has-prefix has-suffix">
-      <span class="prefix" aria-hidden="true">$</span>
-      <input
-        type="number" id="desiredRetirementIncome"
-        min="0" max="1000000" step="1000"
-        inputmode="decimal"
-        value={inputs.desiredRetirementIncome}
-        aria-describedby="desiredRetirementIncome-hint"
-        aria-label="Desired annual retirement income in today's Canadian dollars"
-        oninput={(e) => setFloat('desiredRetirementIncome', e)}
-      />
-      <span class="suffix" aria-hidden="true">today $</span>
-    </div>
-    <span class="field-hint" id="desiredRetirementIncome-hint">
-      In today's dollars — will be adjusted for inflation.
-      Suggested: <strong>${suggestedRetirementIncome.toLocaleString('en-CA')}/yr</strong>
-      (your living expenses after tax, grossed up to pre-tax)
-    </span>
-  </div>
 </div>
 
 <style>
@@ -333,9 +227,7 @@
     white-space: nowrap;
   }
 
-  .freq-toggle button:last-child {
-    border-right: none;
-  }
+  .freq-toggle button:last-child { border-right: none; }
 
   .freq-toggle button.active {
     background: var(--color-primary);
@@ -343,11 +235,8 @@
     font-weight: 600;
   }
 
-  .freq-toggle button:hover:not(.active) {
-    background: var(--color-border);
-  }
+  .freq-toggle button:hover:not(.active) { background: var(--color-border); }
 
   .surplus { color: var(--color-green, #16a34a); }
   .deficit  { color: var(--color-red,   #dc2626); }
-
 </style>

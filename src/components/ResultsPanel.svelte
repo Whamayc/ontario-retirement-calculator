@@ -2,6 +2,7 @@
   import { formatCAD, formatPercent } from '../lib/formatters.js'
   import StatusBadge from './StatusBadge.svelte'
   import SummaryCards from './SummaryCards.svelte'
+  import MetricsGrid from './MetricsGrid.svelte'
   import RecommendationsBox from './RecommendationsBox.svelte'
 
   let { results, inputs, mcResults = null } = $props()
@@ -25,6 +26,10 @@
   </div>
 
   <SummaryCards {results} />
+
+  <hr class="divider" />
+
+  <MetricsGrid {results} />
 
   <hr class="divider" />
 

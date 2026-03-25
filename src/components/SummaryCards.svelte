@@ -42,7 +42,7 @@
   <div class="fire-meta">
     <span class="fire-label">FIRE Number</span>
     <span class="fire-hint">({formatPercent(results.swrRate)} SWR · today's $)</span>
-    <span class="fire-value">{formatCAD(results.fireNumberToday)}</span>
+    <span class="fire-value">{formatCAD(results.fireNumberTodayGross)}</span>
   </div>
   <div class="fire-progress-wrap">
     <div class="fire-progress-track" aria-label="FIRE progress: {Math.round(results.fireProgress * 100)}%">
@@ -51,6 +51,14 @@
     <span class="fire-progress-pct" style:color={fireBarColor}>
       {Math.round(results.fireProgress * 100)}% there
     </span>
+  </div>
+  <div class="fire-breakdown">
+    Savings {formatCAD(results.currentSavings)}
+    {#if results.otherAssets > 0}
+      + other assets {formatCAD(results.otherAssets)}
+    {/if}
+    = <strong>{formatCAD(results.currentSavings + results.otherAssets)}</strong>
+    of <strong>{formatCAD(results.fireNumberTodayGross)}</strong>
   </div>
 </div>
 
@@ -91,6 +99,12 @@
     font-size: 1.125rem;
     font-weight: 700;
     color: var(--color-text);
+  }
+
+  .fire-breakdown {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    margin-top: 0.25rem;
   }
 
   .fire-progress-wrap {
