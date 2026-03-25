@@ -1,3 +1,5 @@
+import { SP500_ANNUAL_RETURNS } from './historicalReturns.js'
+
 // ─── CPP / OAS adjustment helpers ────────────────────────────────────────────
 
 // CPP: Early (60–64) −0.6%/month before 65 → max −36% at 60
@@ -78,6 +80,14 @@ function sampleNormal(mean, std) {
   return mean + std * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v)
 }
 
+// Lognormal sample — preserves arithmetic mean & std, prevents returns < -100%.
+// Converts arithmetic (mu, sigma) → log-space parameters, draws, then exponentiates.
+function sampleLognormal(mu, sigma) {
+  const sigmaLog = Math.sqrt(Math.log(1 + Math.pow(sigma / (1 + mu), 2)))
+  const muLog    = Math.log(1 + mu) - 0.5 * sigmaLog * sigmaLog
+  return Math.exp(sampleNormal(muLog, sigmaLog)) - 1
+}
+
 function percentile(sorted, p) {
   const idx = (p / 100) * (sorted.length - 1)
   const lo = Math.floor(idx)
@@ -96,6 +106,8 @@ export function runMonteCarlo(inputs, n = 500) {
 
   if (retirementAge <= currentAge || retirementAge >= lifeExpectancy) return null
 
+  const mcMode = inputs.mcMode ?? 'lognormal'
+
   const cppStartAge = inputs.cppStartAge ?? 65
   const oasStartAge = inputs.oasStartAge ?? 65
   const adjCPP = adjustCPP(cppMonthly, cppStartAge)
@@ -103,15 +115,21 @@ export function runMonteCarlo(inputs, n = 500) {
   const cppAge = Math.max(cppStartAge, retirementAge)
   const oasAge = Math.max(oasStartAge, retirementAge)
 
-  const STD_PRE  = stdDevPre
-  const STD_POST = stdDevPost
-
-  const yearsToRetire   = retirementAge - currentAge
-  const inflationFactor = Math.pow(1 + inflationRate, yearsToRetire)
-  const futureIncome    = desiredRetirementIncome * inflationFactor
-  const futureCPP       = adjCPP * 12 * inflationFactor
-  const futureOAS       = adjOAS * 12 * inflationFactor
+  const yearsToRetire      = retirementAge - currentAge
+  const inflationFactor    = Math.pow(1 + inflationRate, yearsToRetire)
+  const futureIncome       = desiredRetirementIncome * inflationFactor
+  const futureCPP          = adjCPP * 12 * inflationFactor
+  const futureOAS          = adjOAS * 12 * inflationFactor
   const futurePensionOther = otherPensionMonthly * 12 * inflationFactor
+
+  // Sampling functions per mode
+  const samplePre  = mcMode === 'historical'
+    ? () => SP500_ANNUAL_RETURNS[Math.floor(Math.random() * SP500_ANNUAL_RETURNS.length)]
+    : () => sampleLognormal(returnRate, stdDevPre)
+
+  const samplePost = mcMode === 'historical'
+    ? () => SP500_ANNUAL_RETURNS[Math.floor(Math.random() * SP500_ANNUAL_RETURNS.length)]
+    : () => sampleLognormal(returnRateRetirement, stdDevPost)
 
   const totalPoints = lifeExpectancy - currentAge + 1
   const allValues   = Array.from({ length: totalPoints }, () => [])
@@ -126,13 +144,13 @@ export function runMonteCarlo(inputs, n = 500) {
       allValues[i].push(Math.max(0, portfolio))
 
       if (age < retirementAge) {
-        portfolio = portfolio * (1 + sampleNormal(returnRate, STD_PRE)) + contribution
+        portfolio = portfolio * (1 + samplePre()) + contribution
         contribution *= (1 + salaryGrowthRate)
       } else {
-        const activeCPP = age >= cppAge ? futureCPP : 0
-        const activeOAS = age >= oasAge ? futureOAS : 0
+        const activeCPP      = age >= cppAge ? futureCPP : 0
+        const activeOAS      = age >= oasAge ? futureOAS : 0
         const annualDrawdown = Math.max(0, futureIncome - futurePensionOther - activeCPP - activeOAS)
-        portfolio = portfolio * (1 + sampleNormal(returnRateRetirement, STD_POST)) - annualDrawdown
+        portfolio = portfolio * (1 + samplePost()) - annualDrawdown
       }
     }
 

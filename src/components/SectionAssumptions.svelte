@@ -1,4 +1,5 @@
 <script>
+  import { SP500_HISTORICAL_MEAN, SP500_HISTORICAL_STD, SP500_YEARS } from '../lib/historicalReturns.js'
   let { inputs = $bindable() } = $props()
 
   // Display helpers for % fields
@@ -126,7 +127,38 @@
     <span class="field-hint" id="swr-hint">Used to calculate your FIRE Number. 4% = classic Trinity Study (30yr). Use 3–3.5% for early retirement (40–50yr horizon). Default: 4%.</span>
   </div>
 
+  <!-- Monte Carlo Method -->
+  <div class="field">
+    <label>Monte Carlo Method</label>
+    <div class="mc-mode-toggle">
+      <button
+        type="button"
+        class:active={inputs.mcMode === 'lognormal'}
+        onclick={() => inputs.mcMode = 'lognormal'}
+      >Lognormal</button>
+      <button
+        type="button"
+        class:active={inputs.mcMode === 'historical'}
+        onclick={() => inputs.mcMode = 'historical'}
+      >Historical S&P 500</button>
+    </div>
+    {#if inputs.mcMode === 'historical'}
+      <span class="field-hint">
+        Randomly resamples actual S&P 500 annual returns ({SP500_YEARS.from}–{SP500_YEARS.to},
+        {SP500_YEARS.count} years). Historical mean: {(SP500_HISTORICAL_MEAN * 100).toFixed(1)}%,
+        std dev: {(SP500_HISTORICAL_STD * 100).toFixed(1)}%. Captures real crashes and fat tails.
+        Your return rate and volatility settings are not used in this mode.
+      </span>
+    {:else}
+      <span class="field-hint">
+        Draws returns from a lognormal distribution using your return rate and volatility settings.
+        Prevents impossible returns (&lt;−100%) and models the positive skew of real markets.
+      </span>
+    {/if}
+  </div>
+
   <!-- Monte Carlo: Pre-retirement volatility -->
+  {#if inputs.mcMode !== 'historical'}
   <div class="field">
     <label for="stdDevPre">Return Volatility — Before Retirement</label>
     <div class="slider-pair">
@@ -179,6 +211,7 @@
     </div>
     <span class="field-hint" id="stdDevPost-hint">Monte Carlo only. Conservative/income portfolio: ~6–10%. Default: 8%.</span>
   </div>
+  {/if}
 
   <!-- Life Expectancy -->
   <div class="field">
@@ -202,3 +235,40 @@
     <span class="field-hint" id="lifeExpectancy-hint">Canadian average life expectancy at 65: ~86 (men), ~88 (women). Default: 90 for safety margin.</span>
   </div>
 </div>
+
+<style>
+  .mc-mode-toggle {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    width: fit-content;
+    margin-top: 0.25rem;
+  }
+
+  .mc-mode-toggle button {
+    padding: 0.375rem 0.875rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    background: var(--color-surface-alt);
+    color: var(--color-text-muted);
+    border: none;
+    cursor: pointer;
+    transition: background 150ms, color 150ms;
+  }
+
+  .mc-mode-toggle button:first-child {
+    border-right: 1px solid var(--color-border);
+  }
+
+  .mc-mode-toggle button.active {
+    background: var(--color-primary);
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .mc-mode-toggle button:hover:not(.active) {
+    background: var(--color-border);
+  }
+</style>

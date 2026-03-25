@@ -68,4 +68,5 @@ export const APP_DEFAULTS = {
   otherPensionMonthly: 0,
   cppStartAge: 65,
   oasStartAge: 65,
+  mcMode: 'lognormal',
 }
