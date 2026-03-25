@@ -1,5 +1,25 @@
 import { SP500_ANNUAL_RETURNS } from './historicalReturns.js'
 
+// ─── Contribution frequency helpers ──────────────────────────────────────────
+
+const PERIODS_PER_YEAR = { weekly: 52, biweekly: 26, monthly: 12, quarterly: 4, annually: 1 }
+
+// Within-year compounding factor for periodic contributions.
+// More frequent contributions are invested earlier → earn more return within the year.
+// For n periods/year at annual rate r:
+//   periodic rate r_p = (1+r)^(1/n) − 1
+//   factor = r / (n × r_p)   [≥ 1 for r > 0, equals 1 when n = 1 or r = 0]
+function contributionFactor(annualRate, n) {
+  if (n <= 1 || annualRate === 0) return 1
+  const periodicRate = Math.pow(1 + annualRate, 1 / n) - 1
+  return annualRate / (n * periodicRate)
+}
+
+function getContribFactor(inputs, rate) {
+  const n = PERIODS_PER_YEAR[inputs.contributionFrequency ?? 'annually'] ?? 1
+  return contributionFactor(rate, n)
+}
+
 // ─── CPP / OAS adjustment helpers ────────────────────────────────────────────
 
 // CPP: Early (60–64) −0.6%/month before 65 → max −36% at 60
@@ -122,6 +142,8 @@ export function runMonteCarlo(inputs, n = 500) {
   const futureOAS          = adjOAS * 12 * inflationFactor
   const futurePensionOther = otherPensionMonthly * 12 * inflationFactor
 
+  const cFactor = getContribFactor(inputs, returnRate)
+
   // Sampling functions per mode
   const samplePre  = mcMode === 'historical'
     ? () => SP500_ANNUAL_RETURNS[Math.floor(Math.random() * SP500_ANNUAL_RETURNS.length)]
@@ -144,7 +166,7 @@ export function runMonteCarlo(inputs, n = 500) {
       allValues[i].push(Math.max(0, portfolio))
 
       if (age < retirementAge) {
-        portfolio = portfolio * (1 + samplePre()) + contribution
+        portfolio = portfolio * (1 + samplePre()) + contribution * cFactor
         contribution *= (1 + salaryGrowthRate)
       } else {
         const activeCPP      = age >= cppAge ? futureCPP : 0
@@ -190,6 +212,8 @@ function buildProjectionSeries(inputs, adjCPP, adjOAS) {
   const futureOAS          = adjOAS * 12 * inflationFactor
   const futurePensionOther = otherPensionMonthly * 12 * inflationFactor
 
+  const cFactor = getContribFactor(inputs, returnRate)
+
   const series = []
   let portfolio = currentSavings
   let totalContributed = currentSavings
@@ -206,8 +230,9 @@ function buildProjectionSeries(inputs, adjCPP, adjOAS) {
     })
 
     if (age < retirementAge) {
-      portfolio = portfolio * (1 + returnRate) + contribution
-      totalContributed += contribution
+      const effectiveContrib = contribution * cFactor
+      portfolio = portfolio * (1 + returnRate) + effectiveContrib
+      totalContributed += contribution          // track nominal contributed (not inflated by factor)
       contribution *= (1 + salaryGrowthRate)
     } else {
       const activeCPP = age >= cppAge ? futureCPP : 0
@@ -330,9 +355,10 @@ export function runCalculations(inputs) {
   const yearsToRetire   = retirementAge - currentAge
   const retirementYears = lifeExpectancy - retirementAge
 
-  // Nest egg
+  // Nest egg — contributions adjusted for within-year compounding based on frequency
+  const cFactor         = getContribFactor(inputs, returnRate)
   const fvSavings       = FV_lump(returnRate, yearsToRetire, currentSavings)
-  const fvContributions = FV_growing_annuity(returnRate, yearsToRetire, annualContribution, salaryGrowthRate)
+  const fvContributions = FV_growing_annuity(returnRate, yearsToRetire, annualContribution * cFactor, salaryGrowthRate)
   const nestEgg         = fvSavings + fvContributions
 
   // Future nominal amounts at retirement
