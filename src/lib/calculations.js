@@ -1,4 +1,62 @@
 import { SP500_ANNUAL_RETURNS } from './historicalReturns.js'
+import {
+  FEDERAL_TAX_BRACKETS_2026, FEDERAL_BPA_2026, FEDERAL_CREDIT_RATE_2026,
+  ONTARIO_TAX_BRACKETS_2026, ONTARIO_BPA_2026, ONTARIO_CREDIT_RATE_2026, ONTARIO_SURTAX_2026,
+  CPP_2026, EI_2026,
+} from './constants.js'
+
+// ─── Tax estimation ───────────────────────────────────────────────────────────
+
+function progressiveTax(income, brackets) {
+  let tax = 0
+  let prev = 0
+  for (const { upTo, rate } of brackets) {
+    if (income <= prev) break
+    tax += (Math.min(income, upTo) - prev) * rate
+    prev = upTo
+    if (upTo === Infinity) break
+  }
+  return tax
+}
+
+// Estimates Ontario employment take-home income.
+// Accounts for: RRSP deduction, federal + Ontario progressive tax, BPA non-refundable
+// credits, Ontario surtax, CPP (base + CPP2) and EI employee premiums.
+// Does NOT include: Ontario Health Premium, Quebec abatement, other provincial levies.
+export function estimateTakeHome(grossIncome, rrspDeduction = 0) {
+  if (grossIncome <= 0) return 0
+  const taxable = Math.max(0, grossIncome - rrspDeduction)
+
+  // ── CPP & EI (based on gross employment income, not taxable income) ──
+  const cppBase  = Math.min(CPP_2026.MAX_CONTRIB,
+    Math.max(0, (Math.min(grossIncome, CPP_2026.YMPE) - CPP_2026.BASIC_EXEMPT) * CPP_2026.RATE))
+  const cpp2     = grossIncome > CPP_2026.YMPE
+    ? Math.min(CPP_2026.CPP2_MAX, (Math.min(grossIncome, CPP_2026.CPP2_YAMPE) - CPP_2026.YMPE) * CPP_2026.CPP2_RATE)
+    : 0
+  const ei       = Math.min(EI_2026.MAX_PREMIUM, Math.min(grossIncome, EI_2026.MAX_INSURABLE) * EI_2026.RATE)
+  const totalCPP = cppBase + cpp2
+
+  // ── Federal tax ──
+  const fedGross   = progressiveTax(taxable, FEDERAL_TAX_BRACKETS_2026)
+  const fedCredits = (FEDERAL_BPA_2026 + totalCPP + ei) * FEDERAL_CREDIT_RATE_2026
+  const fedTax     = Math.max(0, fedGross - fedCredits)
+
+  // ── Ontario tax ──
+  const onGross  = progressiveTax(taxable, ONTARIO_TAX_BRACKETS_2026)
+  // Surtax applied on basic Ontario tax before credits
+  let onSurtax = 0
+  if (onGross > ONTARIO_SURTAX_2026.THRESHOLD_2) {
+    onSurtax = ONTARIO_SURTAX_2026.RATE_1 * (onGross - ONTARIO_SURTAX_2026.THRESHOLD_1)
+             + ONTARIO_SURTAX_2026.RATE_2 * (onGross - ONTARIO_SURTAX_2026.THRESHOLD_2)
+  } else if (onGross > ONTARIO_SURTAX_2026.THRESHOLD_1) {
+    onSurtax = ONTARIO_SURTAX_2026.RATE_1 * (onGross - ONTARIO_SURTAX_2026.THRESHOLD_1)
+  }
+  const onCredits = (ONTARIO_BPA_2026 + totalCPP + ei) * ONTARIO_CREDIT_RATE_2026
+  const onTax     = Math.max(0, onGross + onSurtax - onCredits)
+
+  // Subtract RRSP contribution: it reduces taxes but is not spendable cash
+  return grossIncome - fedTax - onTax - totalCPP - ei - rrspDeduction
+}
 
 // ─── Contribution frequency helpers ──────────────────────────────────────────
 
@@ -15,9 +73,27 @@ function contributionFactor(annualRate, n) {
   return annualRate / (n * periodicRate)
 }
 
-function getContribFactor(inputs, rate) {
-  const n = PERIODS_PER_YEAR[inputs.contributionFrequency ?? 'annually'] ?? 1
-  return contributionFactor(rate, n)
+// Sum of each account's effective annual contribution (per-period × periods × compounding factor).
+// Each account can have its own frequency, so factors are applied independently.
+function effectiveAnnualContrib(inputs, rate) {
+  const accounts = [
+    { periodic: inputs.rrspContribution   ?? 0, freq: inputs.rrspFrequency   ?? 'annually' },
+    { periodic: inputs.tfsaContribution   ?? 0, freq: inputs.tfsaFrequency   ?? 'annually' },
+    { periodic: inputs.nonRegContribution ?? 0, freq: inputs.nonRegFrequency ?? 'annually' },
+  ]
+  return accounts.reduce((sum, { periodic, freq }) => {
+    const n = PERIODS_PER_YEAR[freq] ?? 1
+    return sum + periodic * n * contributionFactor(rate, n)
+  }, 0)
+}
+
+// Nominal annual total (no compounding factor) — used for display and recommendations.
+function nominalAnnualContrib(inputs) {
+  return (
+    (inputs.rrspContribution   ?? 0) * (PERIODS_PER_YEAR[inputs.rrspFrequency   ?? 'annually'] ?? 1) +
+    (inputs.tfsaContribution   ?? 0) * (PERIODS_PER_YEAR[inputs.tfsaFrequency   ?? 'annually'] ?? 1) +
+    (inputs.nonRegContribution ?? 0) * (PERIODS_PER_YEAR[inputs.nonRegFrequency ?? 'annually'] ?? 1)
+  )
 }
 
 // ─── CPP / OAS adjustment helpers ────────────────────────────────────────────
@@ -118,7 +194,7 @@ function percentile(sorted, p) {
 export function runMonteCarlo(inputs, n = 500) {
   const {
     currentAge, retirementAge, lifeExpectancy,
-    currentSavings, annualContribution, salaryGrowthRate,
+    currentSavings, salaryGrowthRate,
     returnRate, returnRateRetirement, inflationRate,
     stdDevPre, stdDevPost,
     desiredRetirementIncome, cppMonthly, oasMonthly, otherPensionMonthly,
@@ -142,7 +218,7 @@ export function runMonteCarlo(inputs, n = 500) {
   const futureOAS          = adjOAS * 12 * inflationFactor
   const futurePensionOther = otherPensionMonthly * 12 * inflationFactor
 
-  const cFactor = getContribFactor(inputs, returnRate)
+  const initEffContrib = effectiveAnnualContrib(inputs, returnRate)
 
   // Sampling functions per mode
   const samplePre  = mcMode === 'historical'
@@ -159,14 +235,14 @@ export function runMonteCarlo(inputs, n = 500) {
 
   for (let sim = 0; sim < n; sim++) {
     let portfolio    = currentSavings
-    let contribution = annualContribution
+    let contribution = initEffContrib
 
     for (let i = 0; i < totalPoints; i++) {
       const age = currentAge + i
       allValues[i].push(Math.max(0, portfolio))
 
       if (age < retirementAge) {
-        portfolio = portfolio * (1 + samplePre()) + contribution * cFactor
+        portfolio = portfolio * (1 + samplePre()) + contribution
         contribution *= (1 + salaryGrowthRate)
       } else {
         const activeCPP      = age >= cppAge ? futureCPP : 0
@@ -197,7 +273,7 @@ export function runMonteCarlo(inputs, n = 500) {
 function buildProjectionSeries(inputs, adjCPP, adjOAS) {
   const {
     currentAge, retirementAge, lifeExpectancy,
-    currentSavings, annualContribution, salaryGrowthRate,
+    currentSavings, salaryGrowthRate,
     returnRate, returnRateRetirement, inflationRate,
     desiredRetirementIncome, otherPensionMonthly,
   } = inputs
@@ -212,16 +288,15 @@ function buildProjectionSeries(inputs, adjCPP, adjOAS) {
   const futureOAS          = adjOAS * 12 * inflationFactor
   const futurePensionOther = otherPensionMonthly * 12 * inflationFactor
 
-  const cFactor = getContribFactor(inputs, returnRate)
-
   const series = []
-  let portfolio = currentSavings
-  let totalContributed = currentSavings
-  let contribution = annualContribution
+  let portfolio    = currentSavings
+  let totalContrib = currentSavings
+  let effContrib   = effectiveAnnualContrib(inputs, returnRate)  // grows each year
+  let nomContrib   = nominalAnnualContrib(inputs)                 // for tracking
 
   for (let age = currentAge; age <= lifeExpectancy; age++) {
     const pv = Math.max(0, portfolio)
-    const contributed = Math.max(0, Math.min(totalContributed, pv))
+    const contributed = Math.max(0, Math.min(totalContrib, pv))
     series.push({
       age,
       portfolioValue: pv,
@@ -230,16 +305,16 @@ function buildProjectionSeries(inputs, adjCPP, adjOAS) {
     })
 
     if (age < retirementAge) {
-      const effectiveContrib = contribution * cFactor
-      portfolio = portfolio * (1 + returnRate) + effectiveContrib
-      totalContributed += contribution          // track nominal contributed (not inflated by factor)
-      contribution *= (1 + salaryGrowthRate)
+      portfolio    = portfolio * (1 + returnRate) + effContrib
+      totalContrib += nomContrib
+      effContrib   *= (1 + salaryGrowthRate)
+      nomContrib   *= (1 + salaryGrowthRate)
     } else {
       const activeCPP = age >= cppAge ? futureCPP : 0
       const activeOAS = age >= oasAge ? futureOAS : 0
       const drawdown  = Math.max(0, futureIncome - futurePensionOther - activeCPP - activeOAS)
-      portfolio = portfolio * (1 + returnRateRetirement) - drawdown
-      totalContributed -= drawdown
+      portfolio    = portfolio * (1 + returnRateRetirement) - drawdown
+      totalContrib -= drawdown
     }
   }
 
@@ -251,11 +326,11 @@ function buildProjectionSeries(inputs, adjCPP, adjOAS) {
 function computeRecommendations(inputs, shortfall, requiredCapital) {
   const {
     returnRate, returnRateRetirement, retirementAge, currentAge,
-    annualContribution, desiredRetirementIncome,
-    inflationRate, lifeExpectancy,
+    desiredRetirementIncome, inflationRate, lifeExpectancy,
     cppMonthly, oasMonthly, otherPensionMonthly,
   } = inputs
 
+  const totalAnnual = nominalAnnualContrib(inputs)
   const years = retirementAge - currentAge
   const recs = []
 
@@ -270,7 +345,7 @@ function computeRecommendations(inputs, shortfall, requiredCapital) {
     recs.push({
       type: 'contribution',
       extraContrib,
-      message: `Increase annual contributions by $${Math.ceil(extraContrib).toLocaleString('en-CA')} (to $${Math.ceil(annualContribution + extraContrib).toLocaleString('en-CA')}/year)`,
+      message: `Increase annual contributions by $${Math.ceil(extraContrib).toLocaleString('en-CA')} (to $${Math.ceil(totalAnnual + extraContrib).toLocaleString('en-CA')}/year)`,
     })
   }
 
@@ -330,7 +405,7 @@ function computeRecommendations(inputs, shortfall, requiredCapital) {
 export function runCalculations(inputs) {
   const {
     currentAge, retirementAge, currentSavings,
-    annualContribution, salaryGrowthRate, desiredRetirementIncome,
+    salaryGrowthRate, desiredRetirementIncome,
     returnRate, returnRateRetirement, inflationRate, lifeExpectancy,
     cppMonthly, oasMonthly, otherPensionMonthly,
     swrRate,
@@ -355,11 +430,11 @@ export function runCalculations(inputs) {
   const yearsToRetire   = retirementAge - currentAge
   const retirementYears = lifeExpectancy - retirementAge
 
-  // Nest egg — contributions adjusted for within-year compounding based on frequency
-  const cFactor         = getContribFactor(inputs, returnRate)
-  const fvSavings       = FV_lump(returnRate, yearsToRetire, currentSavings)
-  const fvContributions = FV_growing_annuity(returnRate, yearsToRetire, annualContribution * cFactor, salaryGrowthRate)
-  const nestEgg         = fvSavings + fvContributions
+  // Nest egg — each account's effective annual contribution summed, then grown by salary rate
+  const initEffectiveContrib = effectiveAnnualContrib(inputs, returnRate)
+  const fvSavings            = FV_lump(returnRate, yearsToRetire, currentSavings)
+  const fvContributions      = FV_growing_annuity(returnRate, yearsToRetire, initEffectiveContrib, salaryGrowthRate)
+  const nestEgg              = fvSavings + fvContributions
 
   // Future nominal amounts at retirement
   const inflationFactor      = Math.pow(1 + inflationRate, yearsToRetire)
