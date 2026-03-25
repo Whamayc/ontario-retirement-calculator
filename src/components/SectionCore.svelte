@@ -12,9 +12,28 @@
   }
 
   let salaryGrowthPct = $derived(+(inputs.salaryGrowthRate * 100).toFixed(1))
+  function setSalaryGrowth(e) { inputs.salaryGrowthRate = parseFloat(e.target.value) / 100 }
 
-  function setSalaryGrowth(e) {
-    inputs.salaryGrowthRate = parseFloat(e.target.value) / 100
+  // Contribution frequency
+  const FREQUENCIES = [
+    { key: 'weekly',    label: 'Weekly',    periods: 52  },
+    { key: 'biweekly',  label: 'Bi-weekly', periods: 26  },
+    { key: 'monthly',   label: 'Monthly',   periods: 12  },
+    { key: 'quarterly', label: 'Quarterly', periods: 4   },
+    { key: 'annually',  label: 'Annually',  periods: 1   },
+  ]
+
+  let freq        = $derived(FREQUENCIES.find(f => f.key === (inputs.contributionFrequency ?? 'annually')) ?? FREQUENCIES[4])
+  let periodicAmt = $derived(+(inputs.annualContribution / freq.periods).toFixed(2))
+
+  function setPeriodicContribution(e) {
+    const v = parseFloat(e.target.value)
+    if (!isNaN(v)) inputs.annualContribution = v * freq.periods
+  }
+
+  function setFrequency(key) {
+    inputs.contributionFrequency = key
+    // annualContribution unchanged — periodic display amount will update automatically
   }
 </script>
 
@@ -112,21 +131,38 @@
     <span class="field-hint">Toronto single person all-in avg: ~$46,116/year</span>
   </div>
 
-  <!-- Annual Contribution -->
+  <!-- Contribution with frequency selector -->
   <div class="field">
-    <label for="annualContribution">Annual Retirement Contribution</label>
-    <div class="input-wrap has-prefix">
-      <span class="prefix" aria-hidden="true">$</span>
-      <input
-        type="number" id="annualContribution"
-        min="0" max="200000" step="500"
-        inputmode="decimal"
-        value={inputs.annualContribution}
-        aria-label="Annual contribution to retirement savings in Canadian dollars"
-        oninput={(e) => setFloat('annualContribution', e)}
-      />
+    <label for="periodicContribution">Retirement Contribution</label>
+    <div class="contrib-row">
+      <div class="input-wrap has-prefix" style="width: 10rem; flex-shrink: 0">
+        <span class="prefix" aria-hidden="true">$</span>
+        <input
+          type="number" id="periodicContribution"
+          min="0" max="200000" step="10"
+          inputmode="decimal"
+          value={periodicAmt}
+          aria-label="Retirement contribution amount"
+          aria-describedby="contribution-hint"
+          oninput={setPeriodicContribution}
+        />
+      </div>
+      <div class="freq-toggle">
+        {#each FREQUENCIES as f}
+          <button
+            type="button"
+            class:active={freq.key === f.key}
+            onclick={() => setFrequency(f.key)}
+          >{f.label}</button>
+        {/each}
+      </div>
     </div>
-    <span class="field-hint">RRSP limit 2025: $32,490 · TFSA limit: $7,000</span>
+    <span class="field-hint" id="contribution-hint">
+      {#if freq.periods !== 1}
+        = <strong>${inputs.annualContribution.toLocaleString('en-CA', { maximumFractionDigits: 0 })}/year</strong> ·
+      {/if}
+      RRSP limit 2025: $32,490/yr · TFSA limit: $7,000/yr
+    </span>
   </div>
 
   <!-- Salary Growth Rate -->
@@ -174,3 +210,47 @@
     <span class="field-hint" id="desiredRetirementIncome-hint">In today's dollars — will be adjusted for inflation.</span>
   </div>
 </div>
+
+<style>
+  .contrib-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 0.25rem;
+  }
+
+  .freq-toggle {
+    display: flex;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .freq-toggle button {
+    padding: 0.375rem 0.6rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    background: var(--color-surface-alt);
+    color: var(--color-text-muted);
+    border: none;
+    border-right: 1px solid var(--color-border);
+    cursor: pointer;
+    transition: background 150ms, color 150ms;
+    white-space: nowrap;
+  }
+
+  .freq-toggle button:last-child {
+    border-right: none;
+  }
+
+  .freq-toggle button.active {
+    background: var(--color-primary);
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .freq-toggle button:hover:not(.active) {
+    background: var(--color-border);
+  }
+</style>

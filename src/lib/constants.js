@@ -54,6 +54,7 @@ export const APP_DEFAULTS = {
   annualIncome: 85000,
   annualExpenses: 60000,
   annualContribution: 12000,
+  contributionFrequency: 'annually',
   salaryGrowthRate: 0.02,
   desiredRetirementIncome: 60000,
   returnRate: 0.06,
