@@ -31,6 +31,7 @@
         value={inputs.currentAge}
         aria-label="Current age in years"
         oninput={(e) => setInt('currentAge', e)}
+        onchange={(e) => setInt('currentAge', e)}
       />
     </div>
   </div>
@@ -53,6 +54,7 @@
         value={inputs.retirementAge}
         aria-label="Desired retirement age"
         oninput={(e) => setInt('retirementAge', e)}
+        onchange={(e) => setInt('retirementAge', e)}
       />
     </div>
   </div>

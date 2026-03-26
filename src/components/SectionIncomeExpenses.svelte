@@ -27,6 +27,7 @@
         value={inputs.annualIncome}
         aria-label="Annual pre-tax income in Canadian dollars"
         oninput={(e) => setFloat('annualIncome', e)}
+        onchange={(e) => setFloat('annualIncome', e)}
       />
     </div>
     <span class="field-hint">
@@ -49,6 +50,7 @@
         value={inputs.annualExpenses}
         aria-label="Annual living expenses in Canadian dollars"
         oninput={(e) => setFloat('annualExpenses', e)}
+        onchange={(e) => setFloat('annualExpenses', e)}
       />
     </div>
     <span class="field-hint">Toronto single person all-in avg: ~$46,116/year</span>
@@ -67,6 +69,7 @@
         aria-describedby="desiredRetirementIncome-hint"
         aria-label="Desired annual retirement income in today's Canadian dollars"
         oninput={(e) => setFloat('desiredRetirementIncome', e)}
+        onchange={(e) => setFloat('desiredRetirementIncome', e)}
       />
       <span class="suffix" aria-hidden="true">today $</span>
     </div>

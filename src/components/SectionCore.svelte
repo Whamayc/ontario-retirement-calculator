@@ -42,6 +42,7 @@
         value={inputs.currentSavings}
         aria-label="Current retirement savings in Canadian dollars"
         oninput={(e) => setFloat('currentSavings', e)}
+        onchange={(e) => setFloat('currentSavings', e)}
       />
     </div>
   </div>
@@ -58,6 +59,7 @@
         value={inputs.otherNetAssets}
         aria-label="Other net assets in Canadian dollars"
         oninput={(e) => setFloat('otherNetAssets', e)}
+        onchange={(e) => setFloat('otherNetAssets', e)}
       />
     </div>
     <span class="field-hint">
@@ -79,6 +81,7 @@
           value={inputs.rrspContribution}
           aria-label="RRSP contribution per period"
           oninput={(e) => setFloat('rrspContribution', e)}
+          onchange={(e) => setFloat('rrspContribution', e)}
         />
       </div>
       <div class="freq-toggle">
@@ -113,6 +116,7 @@
           value={inputs.tfsaContribution}
           aria-label="TFSA contribution per period"
           oninput={(e) => setFloat('tfsaContribution', e)}
+          onchange={(e) => setFloat('tfsaContribution', e)}
         />
       </div>
       <div class="freq-toggle">
@@ -146,6 +150,7 @@
           value={inputs.nonRegContribution}
           aria-label="Non-registered contribution per period"
           oninput={(e) => setFloat('nonRegContribution', e)}
+          onchange={(e) => setFloat('nonRegContribution', e)}
         />
       </div>
       <div class="freq-toggle">
@@ -190,6 +195,7 @@
           value={salaryGrowthPct}
           aria-label="Expected annual salary growth rate as a percentage"
           oninput={setSalaryGrowth}
+          onchange={setSalaryGrowth}
         />
         <span class="suffix" aria-hidden="true">%</span>
       </div>

@@ -39,6 +39,7 @@
           aria-label="Expected annual investment return before retirement as a percentage"
           aria-describedby="returnRate-hint"
           oninput={setReturnRate}
+          onchange={setReturnRate}
         />
         <span class="suffix" aria-hidden="true">%</span>
       </div>
@@ -66,6 +67,7 @@
           aria-label="Expected annual investment return during retirement as a percentage"
           aria-describedby="returnRateRetirement-hint"
           oninput={setReturnRateRetirement}
+          onchange={setReturnRateRetirement}
         />
         <span class="suffix" aria-hidden="true">%</span>
       </div>
@@ -93,6 +95,7 @@
           aria-label="Expected annual inflation rate as a percentage"
           aria-describedby="inflationRate-hint"
           oninput={setInflationRate}
+          onchange={setInflationRate}
         />
         <span class="suffix" aria-hidden="true">%</span>
       </div>
@@ -120,6 +123,7 @@
           aria-label="Safe withdrawal rate as a percentage"
           aria-describedby="swr-hint"
           oninput={setSwr}
+          onchange={setSwr}
         />
         <span class="suffix" aria-hidden="true">%</span>
       </div>
@@ -178,6 +182,7 @@
           aria-label="Annual return volatility before retirement as a percentage"
           aria-describedby="stdDevPre-hint"
           oninput={setStdDevPre}
+          onchange={setStdDevPre}
         />
         <span class="suffix" aria-hidden="true">%</span>
       </div>
@@ -205,6 +210,7 @@
           aria-label="Annual return volatility during retirement as a percentage"
           aria-describedby="stdDevPost-hint"
           oninput={setStdDevPost}
+          onchange={setStdDevPost}
         />
         <span class="suffix" aria-hidden="true">%</span>
       </div>
